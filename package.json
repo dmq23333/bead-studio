@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test tests/core.test.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.3.3"
+  }
+}

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>豆间 · 拼豆工作室</title>
+    <link rel="stylesheet" href="style.css?v=20261028-v4" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./"
+        ><span class="logo">▦</span> 豆间 <small>BEAD STUDIO</small></a
+      >
+      <div class="header-actions">
+        <span class="local">● 图片在浏览器本地处理</span
+        ><button id="import">打开图纸</button
+        ><button id="save">保存二维图纸 ↗</button>
+      </div>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <div class="eyebrow">A LITTLE PIXEL, A LITTLE JOY</div>
+          <h1>把喜欢，拼成一颗颗小美好<span>。</span></h1>
+          <p>照片 → AI 简化像素网格 → MARD 221 图纸，把灵感拼出来。</p>
+        </div>
+        <span class="edition">你的拼豆创作台 / 01</span>
+      </div>
+      <div class="workspace">
+        <aside class="top">
+          <div class="group">
+            <div class="section-title">
+              <b>01</b>
+              <h2>选择你的灵感</h2>
+            </div>
+            <div class="source">
+              <label class="upload" id="drop"
+                ><input
+                  id="file"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                /><span class="upload-icon">＋</span
+                ><strong>点击或拖入图片</strong
+                ><small>PNG / JPG / WebP · 最大 15 MB</small></label
+              >
+              <div id="original-wrap">
+                <canvas id="original" width="256" height="192"></canvas
+                ><span>原图</span>
+              </div>
+            </div>
+            <button class="text-button" id="demo">试试小猫示例 ↗</button>
+          </div>
+          <div class="group">
+            <div class="section-title">
+              <b>02</b>
+              <h2>简化与转换</h2>
+            </div>
+            <div class="row">
+              <label class="field"
+                >图纸尺寸<select id="size">
+                  <option value="52" selected>52 × 52（1 块板）</option>
+                  <option value="104">104 × 104（2 × 2 板）</option>
+                </select></label
+              ><label class="field"
+                >最多颜色 <output id="colorsValue">12 色</output
+                ><input
+                  id="colors"
+                  type="range"
+                  min="2"
+                  max="20"
+                  value="12" /></label
+              ><label class="field"
+                >细节简化 <output id="smoothValue">适中</output
+                ><input id="smooth" type="range" min="0" max="3" value="1"
+              /></label>
+            </div>
+            <div class="checks">
+              <label
+                class="check"
+                title="每格直接取原图像素投票（大图采样更密），边缘不混出过渡色，细节简化改为控制清理次数；取消则为旧的平均缩放"
+                ><input id="vote" type="checkbox" checked /> 锐利边缘</label
+              ><label
+                class="check"
+                title="替换没有同色邻居的相近色杂点，并合并占比很小的相近色；眼睛等高对比细节会保留"
+                ><input id="clean" type="checkbox" checked />
+                清理孤立色点</label
+              ><label
+                class="check"
+                title="中值滤波去除照片噪点，会损伤细线，插画不建议开启；需配合锐利边缘"
+                ><input id="denoise" type="checkbox" /> 照片降噪</label
+              ><label class="check"
+                ><input id="background" type="checkbox" /> 去除近白色背景</label
+              ><label
+                class="check"
+                title="紧邻空位的一圈豆子统一为已用颜色中最深的一种，需透明背景或去除背景"
+                ><input id="outline" type="checkbox" checked />
+                统一描边颜色</label
+              >
+            </div>
+            <div class="actions">
+              <button class="primary" id="generate">
+                普通像素转换 <span>→</span></button
+              ><button class="text-button" id="palette-import">
+                导入色卡 JSON
+              </button>
+            </div>
+          </div>
+          <details class="group" open>
+            <summary>✧ AI 简化重绘 · Ollama</summary>
+            <p class="hint" id="backend-status">正在检测本地 AI 后端…</p>
+            <div class="row">
+              <label class="field"
+                >视觉模型<input id="model" value="granite3.2-vision" /></label
+              ><label class="field"
+                >AI 网格宽度<select id="ai-size">
+                  <option value="16">16 格 · 推荐</option>
+                  <option value="24" selected>24 格 · 更多细节</option>
+                  <option value="32">32 格 · 较慢</option>
+                </select></label
+              >
+            </div>
+            <label class="field"
+              >创作要求<textarea
+                id="instructions"
+                maxlength="1500"
+                rows="2"
+                placeholder="例如：只保留猫咪头像，保留额头花纹，去掉背景。最多 16 色，背景为空位。"
+              ></textarea>
+            </label>
+            <div class="actions">
+              <button class="primary" id="ai-generate">AI 生成简化网格 →</button
+              ><button class="text-button" id="analyze">只分析图片特征</button>
+            </div>
+            <p id="ai-result" class="hint" role="status"></p>
+          </details>
+        </aside>
+        <section class="editor">
+          <div class="editor-head">
+            <div>
+              <span class="status-dot"></span
+              ><strong id="project-title">小猫的午后</strong
+              ><small id="dimensions">48 × 48 格</small>
+            </div>
+            <div class="view-toggle">
+              <button id="beads" class="active">彩色网格</button
+              ><button id="chart">色号图纸</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="tools">
+              <button id="pen" class="active" title="画笔">✎ 画笔</button
+              ><button id="fill" title="填充相连的同色区域或空白">◉ 填充</button
+              ><button id="eraser">▱ 橡皮</button
+              ><button id="picker">⊙ 取色</button><span class="divider"></span
+              ><button id="undo" title="撤销">↶</button
+              ><button id="redo" title="重做">↷</button
+              ><span class="divider"></span
+              ><button id="trace" title="把当前图纸淡显为底图，在上面的空白图层手绘">
+                ◧ 垫图重画</button
+              ><label class="zoom" id="trace-opacity-field" style="display: none"
+                >底图
+                <input
+                  id="trace-opacity"
+                  type="range"
+                  min="5"
+                  max="80"
+                  value="30"
+              /></label>
+            </div>
+            <label class="zoom"
+              >缩放
+              <select id="zoom">
+                <option value="1">100%</option>
+                <option value="1.5">150%</option>
+                <option value="2">200%</option>
+                <option value="0.75">75%</option>
+              </select></label
+            >
+          </div>
+          <div class="canvas-area" id="canvas-area">
+            <canvas id="grid" aria-label="拼豆图纸画布"></canvas>
+          </div>
+          <div class="canvas-footer">
+            <span>✎ 点击或拖动画布修整细节</span
+            ><span id="selected">当前颜色 C01</span>
+          </div>
+          <div class="bottom">
+            <div>
+              <h3>每一颗，都有自己的位置。</h3>
+              <p>慢一点，把喜欢的画面拼出来。</p>
+            </div>
+            <button id="export">导出图纸 ↗</button>
+          </div>
+        </section>
+        <aside class="right">
+          <div class="section-title">
+            <b>03</b>
+            <h2>你的配色清单</h2>
+          </div>
+          <div class="stats">
+            <div><strong id="total">0</strong><span>颗豆子</span></div>
+            <div><strong id="used">0</strong><span>种颜色</span></div>
+          </div>
+          <div class="palette-heading">
+            <span id="palette-name">MARD 色卡</span><small>数量 / 颗</small>
+          </div>
+          <label class="check"
+            ><input id="only-used" type="checkbox" checked />
+            只显示已用颜色</label
+          ><input
+            id="color-search"
+            aria-label="搜索色号"
+            placeholder="搜索色号，例如 A1"
+            type="search"
+          />
+          <div id="palette"></div>
+          <button class="text-button" id="reset-palette">
+            恢复 MARD 221 色卡
+          </button>
+          <p class="hint">
+            221 色已与指定 JSON 核对一致。<a href="mard221.json" download
+              >下载当前色卡 ↗</a
+            >
+          </p>
+          <div class="note">
+            <span>✦</span>
+            <p>
+              选一种颜色，再到画布上涂画。<br />右键点击色卡可全局替换该颜色。
+            </p>
+          </div>
+          <button id="png">下载预览 PNG</button
+          ><button id="print">打印 / 保存 PDF</button>
+          <p class="hint">
+            PDF 使用浏览器打印。按 52 × 52 格一块板分页，每页附本板配色用量。
+          </p>
+        </aside>
+      </div>
+      <footer>
+        豆间 BEAD STUDIO · 20261028-v4
+        <span>把日常的小喜欢，变成手心里的作品。</span
+        ><a href="bead-studio-20261028-v4.zip" download
+          >下载源码与 Docker 配置 ↗</a
+        >
+      </footer>
+    </main>
+    <div id="toast" role="status"></div>
+    <input
+      id="project-file"
+      type="file"
+      accept="application/json"
+      hidden
+    /><input id="palette-file" type="file" accept="application/json" hidden />
+    <script type="module" src="app.mjs?v=20261028-v4"></script>
+  </body>
+</html>

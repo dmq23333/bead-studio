@@ -1,0 +1,8 @@
+{
+  "name": "MARD 221",
+  "source": "User-provided mard221.json",
+  "count": 221,
+  "sha256": "7973f6b3172f019f949a9110f6226078e249b5a7d28233f5b136b3e57bea9c02",
+  "updated": "2026-10-28",
+  "notes": "All code, hex and rgb values are taken unchanged from the user-provided reference."
+}
