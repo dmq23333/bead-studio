@@ -101,18 +101,36 @@ const DISTINCT_DELTA = 8, // top colors closer than this yield their slot to mor
   CLEAN_DELTA = 45, // lone cells this different from their neighbors are detail, not noise (shades of skin ≈ 28, black on skin ≈ 69)
   MIN_SHARE = 0.001, // colors below this share of pixels are noise, not candidates for a slot
   MERGE_DELTA = 15, // rare colors merge only into a main color this close
-  RARE_SHARE = 0.01;
+  RARE_SHARE = 0.01,
+  SPECK_SIZE = 2, // same-color regions this small are cleanup candidates
+  LINE_SHARE = 0.15; // a much darker color covering this share of a cell wins it (thin lines)
 // Pick n colors, scoring coverage × distance from those already picked so a gradient
 // can't crowd out small dark eyes; near-duplicates only fill slots left over.
-export function topColors(data, colors, n) {
-  const labs = colors.map((p) => lab(rgb(p.hex)));
+// Opaque pixels per palette color, each pixel matched against the whole palette.
+function paletteCounts(data, labs) {
   const all = matcher(
     labs,
-    colors.map((_, i) => i),
+    labs.map((_, i) => i),
   );
-  const counts = Array(colors.length).fill(0);
+  const counts = Array(labs.length).fill(0);
   for (let i = 0; i < data.length; i += 4)
     if (data[i + 3] >= 128) counts[all(data[i], data[i + 1], data[i + 2])]++;
+  return counts;
+}
+// Share of opaque pixels held by the n most common palette colors. High for line art
+// and flat graphics (vote sampling keeps their edges), low for photos and detailed
+// pixel art (averaging gives their true mixed colors).
+export function dominantShare(data, colors, n = 4) {
+  const counts = paletteCounts(
+      data,
+      colors.map((p) => lab(rgb(p.hex))),
+    ).sort((a, b) => b - a),
+    total = counts.reduce((a, b) => a + b, 0);
+  return total ? counts.slice(0, n).reduce((a, b) => a + b, 0) / total : 1;
+}
+export function topColors(data, colors, n) {
+  const labs = colors.map((p) => lab(rgb(p.hex)));
+  const counts = paletteCounts(data, labs);
   const ranked = counts
     .map((n, i) => ({ n, i }))
     .filter((x) => x.n)
@@ -208,6 +226,8 @@ export function convert(
   const near = matcher(labs, topColors(data, colors, maxColors)),
     sw = w * scale;
   let cells = Array(w * h).fill(null);
+  const shares = Array(w * h).fill(null), // color → fraction of the cell's opaque samples
+    inks = Array(w * h).fill(null);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const votes = new Map();
@@ -225,32 +245,103 @@ export function convert(
       let best = null,
         most = 0;
       for (const [c, v] of votes) if (v > most) (most = v), (best = c);
-      cells[y * w + x] = best;
+      const opaque = scale * scale - empty,
+        i = y * w + x;
+      cells[i] = best;
+      shares[i] = new Map([...votes].map(([c, v]) => [c, v / opaque]));
+      // a line thinner than half a cell never takes the majority: remember a much
+      // darker color covering at least LINE_SHARE as this cell's ink candidate
+      let inkVotes = 0;
+      for (const [c, v] of votes)
+        if (
+          v >= opaque * LINE_SHARE &&
+          v > inkVotes &&
+          labs[c][0] < labs[best][0] &&
+          deltaE(labs[c], labs[best]) >= CLEAN_DELTA
+        )
+          (inks[i] = c), (inkVotes = v);
     }
+  // ink wins only at the line's center (non-maximum suppression across it), so a
+  // line straddling two cells becomes one cell wide, not two
+  const share = (x, y, c) =>
+    x < 0 || y < 0 || x >= w || y >= h ? 0 : shares[y * w + x]?.get(c) || 0;
+  const withInk = [...cells];
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const c = inks[y * w + x];
+      if (c === null) continue;
+      const s = share(x, y, c),
+        l = share(x - 1, y, c),
+        r = share(x + 1, y, c),
+        u = share(x, y - 1, c),
+        d = share(x, y + 1, c);
+      // the line runs along the axis whose neighbors hold more ink; test across it
+      // ponytail: 4-neighbor direction guess, gradient-based NMS if diagonals look uneven
+      const [a, b] = l + r <= u + d ? [l, r] : [u, d];
+      if (s > a && s >= b) withInk[y * w + x] = c;
+    }
+  cells = withInk;
   // clean: number of cleanup passes (true = 1)
   for (let pass = 0; pass < Number(clean); pass++) {
-    const src = [...cells];
-    for (let y = 1; y < h - 1; y++)
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        if (src[i] === null) continue;
-        const ns = [src[i - 1], src[i + 1], src[i - w], src[i + w]];
-        if (ns.includes(src[i])) continue; // has a same-colored neighbor: lines stay whole
-        // neighbors tied 2–2 are common at gradient bands: take the closer color
-        let best = null,
-          bestN = 1,
-          bestD = CLEAN_DELTA;
-        for (const n of new Set(ns)) {
-          if (n === null) continue;
-          const count = ns.filter((v) => v === n).length,
-            d = deltaE(labs[src[i]], labs[n]);
-          if (d >= CLEAN_DELTA || count < bestN) continue;
-          if (count > bestN || d < bestD) (best = n), (bestN = count), (bestD = d);
-        }
-        if (best !== null && bestN >= 2) cells[i] = best;
-      }
+    const src = [...cells],
+      seen = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      if (src[i] === null || seen[i]) continue;
+      const blob = componentOf(src, w, h, i, seen);
+      if (!blob) continue; // bigger than SPECK_SIZE: lines and regions stay whole
+      const best = absorber(src, w, h, blob, labs);
+      if (best !== null) for (const j of blob) cells[j] = best;
+    }
   }
   return clean ? mergeRare(cells, labs) : cells;
+}
+// 4-connected same-color region around start (all marked seen), or null if bigger than SPECK_SIZE.
+function componentOf(cells, w, h, start, seen) {
+  const blob = [start];
+  seen[start] = 1;
+  for (let k = 0; k < blob.length; k++) {
+    const i = blob[k],
+      x = i % w;
+    for (const j of [
+      x > 0 ? i - 1 : -1,
+      x < w - 1 ? i + 1 : -1,
+      i - w,
+      i + w < w * h ? i + w : -1,
+    ])
+      if (j >= 0 && !seen[j] && cells[j] === cells[start]) {
+        seen[j] = 1;
+        blob.push(j);
+      }
+  }
+  // flood it all before rejecting, or a later start inside it would look like a speck
+  return blob.length > SPECK_SIZE ? null : blob;
+}
+// The color a speck should become: one holding at least half of its border (and ≥ 2
+// cells) and closer than CLEAN_DELTA; ties (gradient bands) go to the closer color.
+function absorber(cells, w, h, blob, labs) {
+  const inBlob = new Set(blob),
+    border = [];
+  for (const i of blob) {
+    const x = i % w;
+    if (x > 0 && !inBlob.has(i - 1)) border.push(cells[i - 1]);
+    if (x < w - 1 && !inBlob.has(i + 1)) border.push(cells[i + 1]);
+    if (i >= w && !inBlob.has(i - w)) border.push(cells[i - w]);
+    if (i + w < w * h && !inBlob.has(i + w)) border.push(cells[i + w]);
+  }
+  const self = labs[cells[blob[0]]],
+    need = Math.max(2, Math.ceil(border.length / 2));
+  let best = null,
+    bestN = 0,
+    bestD = CLEAN_DELTA;
+  for (const n of new Set(border)) {
+    if (n === null) continue;
+    const count = border.filter((v) => v === n).length,
+      d = deltaE(self, labs[n]);
+    if (d >= CLEAN_DELTA || count < need) continue;
+    if (count > bestN || (count === bestN && d < bestD))
+      (best = n), (bestN = count), (bestD = d);
+  }
+  return best;
 }
 // Recolor the 4-connected region of same-valued cells around start; empty (null) regions fill too.
 // Returns the same array when nothing would change.
@@ -281,27 +372,46 @@ export function isMajorLine(n, size) {
   return r === 0 || (r - 1) % 5 === 0;
 }
 // Clear near-white pixels connected to the image border; white inside the subject stays.
-export function removeBackground(data, w, h, threshold = 235) {
-  const isBg = (i) =>
-    data[i * 4 + 3] < 128 ||
-    (data[i * 4] > threshold &&
-      data[i * 4 + 1] > threshold &&
-      data[i * 4 + 2] > threshold);
+// Then peel up to `halo` rings of lighter anti-aliased fringe (all channels > soft)
+// touching that background, so edge cells don't pick up a pale outline.
+// ponytail: fringe = "light", a dark outline's grey blend survives; per-pixel unmixing if that shows up
+export function removeBackground(
+  data,
+  w,
+  h,
+  threshold = 235,
+  halo = 0,
+  soft = 190,
+) {
+  const light = (i, t) =>
+    data[i * 4] > t && data[i * 4 + 1] > t && data[i * 4 + 2] > t;
+  const isBg = (i) => data[i * 4 + 3] < 128 || light(i, threshold);
   const seen = new Uint8Array(w * h),
-    stack = [];
-  const push = (i) => {
-    if (!seen[i] && isBg(i)) (seen[i] = 1), stack.push(i);
-  };
-  for (let x = 0; x < w; x++) push(x), push((h - 1) * w + x);
-  for (let y = 0; y < h; y++) push(y * w), push(y * w + w - 1);
-  while (stack.length) {
-    const i = stack.pop(),
-      x = i % w;
+    neighbors = (i, x = i % w) =>
+      [
+        x > 0 && i - 1,
+        x < w - 1 && i + 1,
+        i - w,
+        i + w < w * h && i + w,
+      ].filter((j) => j !== false && j >= 0);
+  let front = [];
+  const add = (i) => {
+    seen[i] = 1;
     data[i * 4 + 3] = 0;
-    if (x > 0) push(i - 1);
-    if (x < w - 1) push(i + 1);
-    if (i >= w) push(i - w);
-    if (i < w * (h - 1)) push(i + w);
+    front.push(i);
+  };
+  for (let x = 0; x < w; x++)
+    for (const i of [x, (h - 1) * w + x]) if (!seen[i] && isBg(i)) add(i);
+  for (let y = 0; y < h; y++)
+    for (const i of [y * w, y * w + w - 1]) if (!seen[i] && isBg(i)) add(i);
+  for (let k = 0; k < front.length; k++)
+    for (const j of neighbors(front[k])) if (!seen[j] && isBg(j)) add(j);
+  // each ring: light pixels touching the previous ring, no further flooding
+  for (let ring = 0; ring < halo && front.length; ring++) {
+    const prev = front;
+    front = [];
+    for (const i of prev)
+      for (const j of neighbors(i)) if (!seen[j] && light(j, soft)) add(j);
   }
   return data;
 }

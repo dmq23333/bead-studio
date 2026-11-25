@@ -8,6 +8,8 @@ ROOT=Path(__file__).parent
 APP_VERSION='20261103-v10'
 AI_LOCK=threading.Lock()
 class Handler(SimpleHTTPRequestHandler):
+    # Windows' registry can map .mjs to text/plain, and browsers refuse such modules
+    extensions_map={**SimpleHTTPRequestHandler.extensions_map,'.mjs':'text/javascript'}
     def end_headers(self):
         self.send_header('Cache-Control','no-store, max-age=0')
         super().end_headers()

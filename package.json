@@ -3,7 +3,8 @@
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test tests/core.test.mjs"
+    "test": "node --test tests/core.test.mjs",
+    "samples": "python -c \"import http.server as h; h.SimpleHTTPRequestHandler.extensions_map['.mjs']='text/javascript'; print('http://localhost:8000/tests/samples/compare.html'); h.test(h.SimpleHTTPRequestHandler, port=8000, bind='127.0.0.1')\""
   },
   "devDependencies": {
     "prettier": "3.3.3"

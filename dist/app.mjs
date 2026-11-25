@@ -2,6 +2,7 @@ import {
   palette as defaults,
   convert,
   topColors,
+  dominantShare,
   isMajorLine,
   medianFilter,
   floodFill,
@@ -11,7 +12,7 @@ import {
   validatePalette,
   serializeProject,
   projectCells,
-} from "./core.mjs?v=mard-label-20261028";
+} from "./core.mjs?v=auto-sample-20261125";
 const $ = (id) => document.getElementById(id);
 let palette = structuredClone(defaults),
   cells = [],
@@ -208,7 +209,8 @@ function sampleSource(width, height) {
   c.drawImage(source, (sw - dw) / 2, (sh - dh) / 2, dw, dh);
   const d = c.getImageData(0, 0, sw, sh);
   if (vote && $("denoise").checked) medianFilter(d.data, sw, sh, k >> 2);
-  if ($("background").checked) removeBackground(d.data, sw, sh);
+  // halo: peel about a quarter cell of light anti-aliased fringe
+  if ($("background").checked) removeBackground(d.data, sw, sh, 235, k >> 2);
   return { data: d.data, k };
 }
 // Sharp mode can't blur, so the detail slider sets how many cleanup passes run.
@@ -251,8 +253,19 @@ function setSource(img, title) {
     img.height * scale,
   );
   $("project-title").textContent = title;
+  // pick the sampling per image (the checkboxes stay editable): flat graphics vote
+  // and clean, detailed images average and keep their texture
+  const probe = document.createElement("canvas");
+  probe.width = probe.height = 96;
+  const p = probe.getContext("2d", { willReadFrequently: true });
+  p.imageSmoothingEnabled = false;
+  p.drawImage(img, 0, 0, 96, 96);
+  const flat =
+    dominantShare(p.getImageData(0, 0, 96, 96).data, palette) >= FLAT_SHARE;
+  $("vote").checked = $("clean").checked = flat;
   generate();
 }
+const FLAT_SHARE = 0.85; // miffy line art ≈ 0.99, pixel-art landscape ≈ 0.4
 async function loadImage(file) {
   if (!file) return;
   if (

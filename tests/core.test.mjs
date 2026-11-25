@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   convert,
   topColors,
+  dominantShare,
   isMajorLine,
   medianFilter,
   floodFill,
@@ -286,4 +287,90 @@ test("background removal keeps white enclosed by the subject", () => {
   const data = removeBackground(new Uint8ClampedArray(px.flat()), 5, 5);
   assert.equal(data[0 * 4 + 3], 0);
   assert.equal(data[12 * 4 + 3], 255);
+});
+test("cleanup absorbs a 2-cell speck but keeps a 3-cell one and contrasting pairs", () => {
+  const skin = [240, 200, 160],
+    off = [236, 196, 160];
+  const grid = (spots, color) =>
+    solid(
+      Array.from({ length: 6 }, (_, y) =>
+        Array.from({ length: 6 }, (_, x) =>
+          spots.includes(y * 6 + x) ? color : skin,
+        ),
+      ),
+    );
+  const at = (spots, color) =>
+    near[convert(grid(spots, color), 6, 6, near, 4, 1)[spots[0]]].code;
+  assert.equal(at([14, 15], off), "L1");
+  assert.equal(at([14, 15], [16, 16, 16]), "K"); // two dark eye cells stay
+  // a 3-cell run is beyond SPECK_SIZE; mergeRare can't take it either (3/36 > 1%)
+  assert.notEqual(at([14, 15, 16], off), "L1");
+});
+test("background removal peels a light fringe only within the halo depth", () => {
+  const W = [255, 255, 255, 255],
+    F = [215, 210, 220, 255], // pale anti-aliased edge
+    D = [41, 43, 53, 255];
+  const row = [W, F, F, D, W];
+  const alpha = (halo) =>
+    [...removeBackground(new Uint8ClampedArray(row.flat()), 5, 1, 235, halo)]
+      .filter((_, i) => i % 4 === 3)
+      .map((a) => (a ? 1 : 0));
+  assert.deepEqual(alpha(0), [0, 1, 1, 1, 0]);
+  assert.deepEqual(alpha(1), [0, 0, 1, 1, 0]);
+  assert.deepEqual(alpha(2), [0, 0, 0, 1, 0]);
+});
+test("cleanup never splits a large region into fake specks", () => {
+  const skin = [240, 200, 160],
+    off = [236, 196, 160];
+  // an off-color L-shape of 4 cells: the early cells must not leave the tail looking like a speck
+  const spots = new Set([7, 8, 9, 15]);
+  const data = solid(
+    Array.from({ length: 6 }, (_, y) =>
+      Array.from({ length: 6 }, (_, x) => (spots.has(y * 6 + x) ? off : skin)),
+    ),
+  );
+  const cells = convert(data, 6, 6, near, 4, 1);
+  assert.equal(new Set([...spots].map((i) => cells[i])).size, 1);
+  assert.notEqual(near[cells[15]].code, "L1");
+});
+test("a thin dark line covering a minority of each cell still wins it", () => {
+  // 2×1 cells of 10×10 samples: a 2-sample-wide black line (20% of the cell) on white
+  const s = 10,
+    px = [];
+  for (let y = 0; y < s; y++)
+    for (let x = 0; x < 2 * s; x++)
+      px.push(x === 4 || x === 5 ? [41, 43, 53, 255] : [250, 243, 223, 255]);
+  const data = new Uint8ClampedArray(px.flat());
+  assert.deepEqual(convert(data, 2, 1, palette, 3, false, s), [0, 1]);
+});
+test("a line straddling two cells becomes one cell wide, not two", () => {
+  // 4×3 cells of 10×10 samples: an 8-sample line split 4|4 across cells 1 and 2
+  const s = 10,
+    px = [];
+  for (let y = 0; y < 3 * s; y++)
+    for (let x = 0; x < 4 * s; x++)
+      px.push(x >= 16 && x < 24 ? [41, 43, 53, 255] : [250, 243, 223, 255]);
+  const cells = convert(
+    new Uint8ClampedArray(px.flat()),
+    4,
+    3,
+    palette,
+    3,
+    false,
+    s,
+  );
+  assert.equal(cells.filter((c) => c === 0).length, 3); // one cell per row
+});
+test("dominantShare tells flat graphics from detailed images", () => {
+  const px = (colors) =>
+    new Uint8ClampedArray(
+      colors.flatMap((p) => [
+        ...p.hex.match(/\w\w/g).map((v) => parseInt(v, 16)),
+        255,
+      ]),
+    );
+  assert.equal(dominantShare(px(mard.slice(0, 2)), mard), 1);
+  // 6 equally common colors: the top 4 hold 4/6
+  assert.ok(Math.abs(dominantShare(px(mard.slice(0, 6)), mard) - 4 / 6) < 1e-9);
+  assert.equal(dominantShare(new Uint8ClampedArray(8), mard), 1); // all transparent
 });
